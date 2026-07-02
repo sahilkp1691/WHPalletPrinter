@@ -7,11 +7,11 @@ from io import BytesIO
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import inch, mm
-from reportlab.lib.utils import ImageReader
+from reportlab.lib.units import mm
+from reportlab.graphics.barcode.code128 import Code128
 from reportlab.pdfgen import canvas
 
-from .barcode import build_scan_payload, render_barcode_png
+from .code128 import build_scan_payload
 
 
 @dataclass
@@ -84,9 +84,9 @@ def build_pdf(rows: list[PrintRow]) -> bytes:
         c.drawString(col_cartons, y, str(row.cartons))
         c.drawString(col_qty, y, str(row.qty))
 
-        png = render_barcode_png(row.barcode_payload)
+        bc = Code128(row.barcode_payload, barHeight=barcode_h, barWidth=0.35 * mm)
         img_y = y - barcode_h + 4 * mm
-        c.drawImage(ImageReader(BytesIO(png)), col_barcode, img_y, width=barcode_w, height=barcode_h)
+        bc.drawOn(c, col_barcode, img_y)
         c.setFont("Helvetica", 7)
         c.setFillColor(colors.HexColor("#5a7a5a"))
         c.drawString(col_barcode, img_y - 4 * mm, f"{row.art_num} / Qty {row.qty}")

@@ -8,7 +8,7 @@
 <div class="app">
   <nav class="sidebar">
     <div class="logo-wrap">
-      <div class="logo-mark" aria-hidden="true">BGA</div>
+      <img src="/bga-logo.png" alt="BGA" class="logo-img" />
       <span class="logo-label">Pallet Printer</span>
     </div>
 
@@ -71,18 +71,12 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.12);
   }
 
-  .logo-mark {
+  .logo-img {
     width: 36px;
     height: 36px;
+    object-fit: contain;
+    flex-shrink: 0;
     border-radius: 6px;
-    background: rgba(255, 255, 255, 0.15);
-    color: #fff;
-    font-size: 11px;
-    font-weight: 800;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    letter-spacing: -0.5px;
   }
 
   .logo-label {

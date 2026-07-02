@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import ArticleQtyCarton, normalize_art_num
-from ..services.barcode import build_scan_payload, render_barcode_base64
+from ..services.code128 import build_scan_payload, render_barcode_base64
 from ..services.pdf_print import PrintRow, build_pdf, print_pdf
 
 router = APIRouter(prefix="/api/print", tags=["print"])
