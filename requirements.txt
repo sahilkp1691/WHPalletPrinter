@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-multipart
+sqlalchemy
+pydantic-settings
+python-dotenv
+openpyxl
+python-barcode
+pillow
+reportlab
+pywebview
