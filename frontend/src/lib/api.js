@@ -57,6 +57,10 @@ export const api = {
   previewPrint: (lines) => request('POST', '/api/print/preview', lines),
 
   print: (lines) => request('POST', '/api/print', lines),
+
+  listPrinters: () => request('GET', '/api/print/printers'),
+
+  setPrinter: (settings) => request('PUT', '/api/print/printers', settings),
 }
 
 export function downloadBlob(blob, filename) {

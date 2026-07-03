@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
 
   let artNum = $state('')
@@ -11,6 +12,61 @@
   let error = $state('')
   let artInput
   let cartonsInput
+
+  let printers = $state([])
+  let defaultPrinter = $state(null)
+  let selectedPrinter = $state('')
+  let printFormat = $state('a4')
+  let printOrientation = $state('portrait')
+  let showConfig = $state(false)
+  let savingPrinter = $state(false)
+
+  onMount(loadPrinters)
+
+  async function loadPrinters() {
+    try {
+      const info = await api.listPrinters()
+      printers = info.printers
+      defaultPrinter = info.default
+      selectedPrinter = info.selected || ''
+      printFormat = info.format || 'a4'
+      printOrientation = info.orientation || 'portrait'
+    } catch (e) {
+      // Non-fatal: printing still falls back to the system default.
+    }
+  }
+
+  async function savePrinter() {
+    savingPrinter = true
+    error = ''
+    try {
+      const info = await api.setPrinter({
+        printer: selectedPrinter || null,
+        format: printFormat,
+        orientation: printOrientation,
+      })
+      printers = info.printers
+      defaultPrinter = info.default
+      selectedPrinter = info.selected || ''
+      printFormat = info.format || 'a4'
+      printOrientation = info.orientation || 'portrait'
+      showConfig = false
+    } catch (e) {
+      error = e.message
+    } finally {
+      savingPrinter = false
+    }
+  }
+
+  const activePrinterLabel = $derived(
+    selectedPrinter || (defaultPrinter ? `${defaultPrinter} (default)` : 'System default')
+  )
+
+  const layoutLabel = $derived(
+    printFormat === 'label_10x15'
+      ? '10×15 cm label'
+      : `A4, ${printOrientation === 'landscape' ? 'landscape' : 'portrait'}`
+  )
 
   async function refreshPreview() {
     if (queue.length === 0) {
@@ -130,6 +186,70 @@
       <h1>Print Labels</h1>
       <p class="subtitle">Enter Art Num and cartons. Qty is calculated from Qty/Carton data.</p>
     </div>
+    <div class="printer-config">
+      <span class="printer-current" title={`${activePrinterLabel} — ${layoutLabel}`}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="6 9 6 2 18 2 18 9"/>
+          <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+          <rect x="6" y="14" width="12" height="8"/>
+        </svg>
+        {activePrinterLabel}
+      </span>
+      <span class="layout-badge" title="Print layout">{layoutLabel}</span>
+      <button class="btn-ghost small" onclick={() => (showConfig = !showConfig)}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        Printer
+      </button>
+
+      {#if showConfig}
+        <div class="printer-panel">
+          <div class="panel-header">
+            <h3>Print settings</h3>
+            <button class="panel-close" onclick={() => (showConfig = false)} aria-label="Close">×</button>
+          </div>
+
+          <label for="print-format">Paper / label size</label>
+          <select id="print-format" bind:value={printFormat}>
+            <option value="a4">A4 sheet (multi-row table)</option>
+            <option value="label_10x15">10×15 cm label (one per row)</option>
+          </select>
+
+          <label for="print-orientation" class="field-spaced">Orientation</label>
+          {#if printFormat === 'label_10x15'}
+            <p class="panel-hint panel-hint-inline">
+              Labels use a fixed 10×15 cm portrait layout (one label per row).
+            </p>
+          {:else}
+            <select id="print-orientation" bind:value={printOrientation}>
+              <option value="portrait">Portrait</option>
+              <option value="landscape">Landscape</option>
+            </select>
+            <p class="panel-hint">
+              Portrait: standard A4. Landscape: A4 rotated 90°.
+            </p>
+          {/if}
+
+          <label for="printer-select" class="field-spaced">Printer</label>
+          <select id="printer-select" bind:value={selectedPrinter}>
+            <option value="">
+              System default{defaultPrinter ? ` (${defaultPrinter})` : ''}
+            </option>
+            {#each printers as p}
+              <option value={p}>{p}</option>
+            {/each}
+          </select>
+          <div class="panel-actions">
+            <button class="btn-ghost small" onclick={loadPrinters} disabled={savingPrinter}>Refresh</button>
+            <button class="btn-primary small" onclick={savePrinter} disabled={savingPrinter}>
+              {savingPrinter ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </div>
+      {/if}
+    </div>
   </header>
 
   {#if error}
@@ -240,11 +360,137 @@
     max-width: 1100px;
   }
 
+  .page-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
   .page-header h1 {
     font-size: 22px;
     font-weight: 700;
     color: var(--text);
     margin-bottom: 4px;
+  }
+
+  .printer-config {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  .printer-current {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 220px;
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .printer-current svg {
+    flex-shrink: 0;
+  }
+
+  .layout-badge {
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--surface2, #f3faf3);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px 8px;
+    white-space: nowrap;
+  }
+
+  .btn-ghost.small,
+  .btn-primary.small {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .printer-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 20;
+    width: 340px;
+    background: var(--surface, #fff);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    padding: 16px;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .panel-header h3 {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .panel-close {
+    background: transparent;
+    border: none;
+    font-size: 20px;
+    line-height: 1;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0 4px;
+  }
+
+  .printer-panel label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .printer-panel select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 13px;
+    background: #fff;
+  }
+
+  .printer-panel label.field-spaced {
+    margin-top: 14px;
+  }
+
+  .panel-hint {
+    margin: 8px 0 0;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+
+  .panel-hint-inline {
+    margin-top: 0;
+  }
+
+  .panel-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 14px;
   }
 
   .subtitle {
