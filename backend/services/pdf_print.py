@@ -35,6 +35,7 @@ class PrintRow:
     cartons: int
     qty_per_carton: int
     qty: int
+    pallet_num: str = ""
 
     @property
     def barcode_payload(self) -> str:
@@ -94,6 +95,7 @@ def _draw_label_page(c: canvas.Canvas, row: PrintRow, page_w: float, page_h: flo
     x_center = page_w / 2
 
     # Target warehouse-readable sizes, then scale everything to fit the safe inner box.
+    pallet_mm = 11.0
     art_mm = 20.0
     line_mm = 13.0
     sub_mm = 10.0
@@ -101,11 +103,12 @@ def _draw_label_page(c: canvas.Canvas, row: PrintRow, page_w: float, page_h: flo
     text_barcode_gap_mm = 4.0
     min_barcode_mm = 28.0
 
-    text_h_mm = art_mm + line_mm * 2 + sub_mm + line_gap_mm * 3 + text_barcode_gap_mm
+    text_h_mm = pallet_mm + art_mm + line_mm * 2 + sub_mm + line_gap_mm * 4 + text_barcode_gap_mm
     barcode_mm = max(min_barcode_mm, inner_h / mm * 0.46 - text_h_mm * 0.15)
     total_mm = text_h_mm + barcode_mm
     if total_mm > inner_h / mm:
         shrink = (inner_h / mm) / total_mm
+        pallet_mm *= shrink
         art_mm *= shrink
         line_mm *= shrink
         sub_mm *= shrink
@@ -113,6 +116,7 @@ def _draw_label_page(c: canvas.Canvas, row: PrintRow, page_w: float, page_h: flo
         text_barcode_gap_mm *= shrink
         barcode_mm = max(min_barcode_mm * shrink, inner_h / mm - text_h_mm * shrink)
 
+    pallet_pt = _mm_to_pt(pallet_mm)
     art_pt = _fit_font_pt(c, row.art_num, "Helvetica-Bold", art_mm, 10, inner_w)
     detail_pt = _mm_to_pt(line_mm)
     sub_pt = _mm_to_pt(sub_mm)
@@ -123,6 +127,12 @@ def _draw_label_page(c: canvas.Canvas, row: PrintRow, page_w: float, page_h: flo
     y = page_h - margin
 
     c.setFillColor(colors.black)
+    if row.pallet_num:
+        c.setFont("Helvetica-Bold", pallet_pt)
+        y -= pallet_pt * 0.82
+        c.drawCentredString(x_center, y, f"PALLET: {row.pallet_num}")
+        y -= line_gap * 0.5
+
     c.setFont("Helvetica-Bold", art_pt)
     y -= art_pt * 0.82
     c.drawCentredString(x_center, y, row.art_num)
@@ -195,10 +205,16 @@ def _build_a4_pdf(rows: list[PrintRow], pagesize: tuple[float, float]) -> bytes:
     font_header = 16 if is_landscape else 15
     font_data = 14 if is_landscape else 13
 
+    pallet_num = rows[0].pallet_num if rows else ""
+
     def draw_table_header(row_top: float) -> float:
         """Draw column titles and divider; return top y of first data row."""
         text_y = row_top - header_text_gap
         c.setFillColor(colors.black)
+        if pallet_num:
+            c.setFont("Helvetica-Bold", font_header)
+            c.drawString(margin, text_y + 6 * mm, f"Pallet: {pallet_num}")
+            text_y -= 6 * mm
         c.setFont("Helvetica-Bold", font_header)
         c.drawString(col_art, text_y, "Art Num")
         c.drawString(col_cartons, text_y, "Cartons")

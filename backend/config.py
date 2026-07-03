@@ -6,12 +6,26 @@ from pydantic_settings import BaseSettings
 
 def _default_data_dir() -> str:
     if getattr(sys, "frozen", False):
-        base = os.path.dirname(sys.executable)
+        candidates = [
+            os.path.join(os.path.dirname(sys.executable), "data"),
+            os.path.join(
+                os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+                "WHPalletPrinter",
+                "data",
+            ),
+        ]
     else:
-        base = os.path.join(os.path.dirname(__file__), "..")
-    data_dir = os.path.join(base, "data")
-    os.makedirs(data_dir, exist_ok=True)
-    return data_dir
+        candidates = [os.path.join(os.path.dirname(__file__), "..", "data")]
+
+    for data_dir in candidates:
+        data_dir = os.path.normpath(data_dir)
+        try:
+            os.makedirs(data_dir, exist_ok=True)
+            return data_dir
+        except OSError:
+            continue
+
+    raise RuntimeError("Could not create application data directory")
 
 
 class Settings(BaseSettings):

@@ -16,7 +16,9 @@ npm --version
 Write-Host "`n=== Building Svelte frontend ===" -ForegroundColor Cyan
 Push-Location frontend
 npm ci
+if ($LASTEXITCODE -ne 0) { throw "npm ci failed (exit $LASTEXITCODE). Stop any running 'npm run dev' and retry." }
 npm run build
+if ($LASTEXITCODE -ne 0) { throw "Frontend build failed (exit $LASTEXITCODE)" }
 Pop-Location
 
 Write-Host "`n=== Setting up Python venv ===" -ForegroundColor Cyan
@@ -30,20 +32,19 @@ if (-not (Test-Path .venv)) {
 Write-Host "`n=== Seeding data files ===" -ForegroundColor Cyan
 .\.venv\Scripts\python.exe scripts\seed_data.py
 
-$iconArg = @()
-if (Test-Path "assets\icon.ico") {
-    $iconArg = @("--icon", "assets\icon.ico")
-}
+Write-Host "`n=== Building app icon ===" -ForegroundColor Cyan
+.\.venv\Scripts\python.exe scripts\build_icon.py
 
 Write-Host "`n=== Running PyInstaller ===" -ForegroundColor Cyan
 .\.venv\Scripts\pyinstaller.exe `
     --noconfirm --clean --windowed --onefile `
     --name WHPalletPrinter `
-    @iconArg `
+    --icon assets\icon.ico `
     --add-data "frontend\dist;frontend\dist" `
     --add-data "data;data" `
     --collect-all pywebview `
     --collect-submodules uvicorn `
+    --collect-submodules reportlab.graphics.barcode `
     app.py
 
 if (-not (Test-Path "dist\WHPalletPrinter.exe")) {

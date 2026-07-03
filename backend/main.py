@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import settings
 from .database import engine
 from .migrations import run_migrations
-from .routes import articles, print as print_routes
+from .routes import packlist, pallet, print as print_routes
 
 app = FastAPI(title="WH Pallet Printer API", docs_url="/api/docs")
 
@@ -29,7 +29,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(articles.router)
+app.include_router(packlist.router)
+app.include_router(pallet.router)
 app.include_router(print_routes.router)
 
 DEV = os.getenv("WHPALLET_DEV", "false").lower() == "true"

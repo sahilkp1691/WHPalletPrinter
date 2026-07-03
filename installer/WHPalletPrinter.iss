@@ -7,8 +7,10 @@
 #define MyAppName       "WH Pallet Printer"
 #define MyAppPublisher  "BGA"
 #define MyAppExeName    "WHPalletPrinter.exe"
+#define MyAppIcon       "..\assets\icon.ico"
 
 [Setup]
+SetupIconFile={#MyAppIcon}
 AppId={{A4C8E2B1-7F3D-4A9C-B6E1-2D8F5C9A4E73}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}

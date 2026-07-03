@@ -34,29 +34,35 @@ async function request(method, path, body, options = {}) {
 }
 
 export const api = {
-  listArticles: (q = '', limit = 200, offset = 0) =>
-    request('GET', `/api/articles?q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}`),
+  getPacklistStatus: () => request('GET', '/api/packlist'),
 
-  getArticle: (artNum) => request('GET', `/api/articles/${encodeURIComponent(artNum)}`),
+  getPacklistDashboard: () => request('GET', '/api/packlist/dashboard'),
 
-  upsertArticle: (artNum, qtyPerCarton) =>
-    request('PUT', `/api/articles/${encodeURIComponent(artNum)}`, { qty_per_carton: qtyPerCarton }),
+  downloadPacklistTemplate: () => request('GET', '/api/packlist/template'),
 
-  deleteArticle: (artNum) => request('DELETE', `/api/articles/${encodeURIComponent(artNum)}`),
-
-  exportArticles: () => request('GET', '/api/articles/export'),
-
-  downloadTemplate: () => request('GET', '/api/articles/template'),
-
-  importArticles: (file) => {
+  importPacklist: (file) => {
     const fd = new FormData()
     fd.append('file', file)
-    return request('POST', '/api/articles/import', fd)
+    return request('POST', '/api/packlist/import', fd)
   },
 
-  previewPrint: (lines) => request('POST', '/api/print/preview', lines),
+  clearPacklist: () => request('DELETE', '/api/packlist'),
 
-  print: (lines) => request('POST', '/api/print', lines),
+  getPallet: (palletNum) =>
+    request('GET', `/api/pallet?pallet_num=${encodeURIComponent(palletNum)}`),
+
+  addCartonToPallet: (palletNum, cartonScan) =>
+    request('POST', '/api/pallet/carton', { pallet_num: palletNum, carton_scan: cartonScan }),
+
+  removeCartonFromPallet: (palletNum, cartonScan) =>
+    request('DELETE', '/api/pallet/carton', { pallet_num: palletNum, carton_scan: cartonScan }),
+
+  clearPallet: (palletNum) =>
+    request('DELETE', `/api/pallet?pallet_num=${encodeURIComponent(palletNum)}`),
+
+  previewPrint: (payload) => request('POST', '/api/print/preview', payload),
+
+  print: (payload) => request('POST', '/api/print', payload),
 
   listPrinters: () => request('GET', '/api/print/printers'),
 

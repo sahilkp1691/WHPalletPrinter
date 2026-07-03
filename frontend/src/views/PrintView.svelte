@@ -1,17 +1,29 @@
 <script>
-  import { onMount } from 'svelte'
-  import { api } from '../lib/api.js'
+  import { onMount, tick } from 'svelte'
+  import { api, downloadBlob } from '../lib/api.js'
 
-  let artNum = $state('')
-  let cartons = $state(1)
-  let queue = $state([])
+  let packlistLoaded = $state(false)
+  let packlistFilename = $state('')
+  let packlistLineCount = $state(0)
+  let packlistCartonCount = $state(0)
+  let assignedCartons = $state(0)
+  let remainingCartons = $state(0)
+  let packlistWarnings = $state([])
+  let importErrors = $state([])
+  let importing = $state(false)
+
+  let palletNum = $state('')
+  let cartonScan = $state('')
+  let scanDetails = $state([])
   let previewRows = $state([])
   let canPrint = $state(false)
   let loading = $state(false)
   let printing = $state(false)
   let error = $state('')
-  let artInput
-  let cartonsInput
+
+  let palletInput
+  let cartonInput
+  let importInput
 
   let printers = $state([])
   let defaultPrinter = $state(null)
@@ -21,7 +33,34 @@
   let showConfig = $state(false)
   let savingPrinter = $state(false)
 
-  onMount(loadPrinters)
+  const palletLocked = $derived(palletNum.trim().length > 0)
+
+  onMount(async () => {
+    await Promise.all([loadPrinters(), loadPacklistStatus()])
+    focusAfterPacklist()
+  })
+
+  async function loadPacklistStatus() {
+    try {
+      const status = await api.getPacklistStatus()
+      packlistLoaded = status.loaded
+      packlistFilename = status.filename || ''
+      packlistLineCount = status.line_count || 0
+      packlistCartonCount = status.carton_count || 0
+      assignedCartons = status.assigned_cartons || 0
+      remainingCartons = status.remaining_cartons || 0
+      packlistWarnings = status.warnings || []
+    } catch {
+      packlistLoaded = false
+    }
+  }
+
+  async function focusAfterPacklist() {
+    await tick()
+    if (packlistLoaded) {
+      palletInput?.focus()
+    }
+  }
 
   async function loadPrinters() {
     try {
@@ -31,7 +70,7 @@
       selectedPrinter = info.selected || ''
       printFormat = info.format || 'a4'
       printOrientation = info.orientation || 'portrait'
-    } catch (e) {
+    } catch {
       // Non-fatal: printing still falls back to the system default.
     }
   }
@@ -58,6 +97,198 @@
     }
   }
 
+  async function downloadTemplate() {
+    try {
+      const blob = await api.downloadPacklistTemplate()
+      downloadBlob(blob, 'packlist_template.xlsx')
+    } catch (e) {
+      error = e.message
+    }
+  }
+
+  async function handleImportFile(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+
+    if (palletNum.trim()) {
+      const ok = confirm(
+        'Importing a new packlist will start a new session. In-progress pallets stay in the previous session. Continue?'
+      )
+      if (!ok) return
+    }
+
+    importing = true
+    error = ''
+    importErrors = []
+    try {
+      const result = await api.importPacklist(file)
+      importErrors = result.errors || []
+      packlistWarnings = result.warnings || []
+
+      if (!result.loaded) {
+        packlistLoaded = false
+        error = importErrors.join('; ') || 'Packlist import failed'
+        return
+      }
+
+      packlistLoaded = true
+      packlistFilename = result.filename
+      packlistLineCount = result.line_count
+      packlistCartonCount = result.carton_count
+      await loadPacklistStatus()
+      clearPalletLocal()
+      await focusAfterPacklist()
+    } catch (e) {
+      error = e.message
+      packlistLoaded = false
+    } finally {
+      importing = false
+    }
+  }
+
+  async function replacePacklist() {
+    importInput?.click()
+  }
+
+  async function loadPalletState() {
+    const num = palletNum.trim()
+    if (!packlistLoaded || !num) {
+      scanDetails = []
+      previewRows = []
+      canPrint = false
+      return
+    }
+
+    loading = true
+    error = ''
+    try {
+      const result = await api.getPallet(num)
+      scanDetails = result.carton_scans
+      previewRows = result.rows
+      canPrint = result.can_print
+      await loadPacklistStatus()
+    } catch (e) {
+      if (e.message?.includes('not found') || e.message?.includes('404')) {
+        scanDetails = []
+        previewRows = []
+        canPrint = false
+      } else {
+        error = e.message
+        scanDetails = []
+        previewRows = []
+        canPrint = false
+      }
+    } finally {
+      loading = false
+    }
+  }
+
+  function onPalletKeydown(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      if (palletNum.trim()) {
+        loadPalletState()
+        cartonInput?.focus()
+      }
+    }
+  }
+
+  async function addCartonScan() {
+    const scan = cartonScan.trim()
+    if (!scan) {
+      error = 'Scan or enter a carton number'
+      return
+    }
+    if (!palletNum.trim()) {
+      error = 'Scan a pallet number first'
+      return
+    }
+
+    loading = true
+    error = ''
+    try {
+      const result = await api.addCartonToPallet(palletNum.trim(), scan)
+      scanDetails = result.carton_scans
+      previewRows = result.rows
+      canPrint = result.can_print
+      cartonScan = ''
+      await loadPacklistStatus()
+      cartonInput?.focus()
+    } catch (e) {
+      error = e.message
+    } finally {
+      loading = false
+    }
+  }
+
+  function onCartonKeydown(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      addCartonScan()
+    }
+  }
+
+  async function removeCarton(scan) {
+    if (!palletNum.trim()) return
+    loading = true
+    error = ''
+    try {
+      const result = await api.removeCartonFromPallet(palletNum.trim(), scan)
+      scanDetails = result.carton_scans
+      previewRows = result.rows
+      canPrint = result.can_print
+      await loadPacklistStatus()
+    } catch (e) {
+      error = e.message
+    } finally {
+      loading = false
+    }
+  }
+
+  function clearPalletLocal() {
+    palletNum = ''
+    cartonScan = ''
+    scanDetails = []
+    previewRows = []
+    canPrint = false
+    error = ''
+    tick().then(() => palletInput?.focus())
+  }
+
+  async function clearPallet() {
+    if (!palletNum.trim()) {
+      clearPalletLocal()
+      return
+    }
+    loading = true
+    error = ''
+    try {
+      await api.clearPallet(palletNum.trim())
+      clearPalletLocal()
+      await loadPacklistStatus()
+    } catch (e) {
+      error = e.message
+    } finally {
+      loading = false
+    }
+  }
+
+  async function printNow() {
+    if (!canPrint || !palletNum.trim()) return
+    printing = true
+    error = ''
+    try {
+      await api.print({ pallet_num: palletNum.trim() })
+      clearPalletLocal()
+      await loadPacklistStatus()
+    } catch (e) {
+      error = e.message
+    } finally {
+      printing = false
+    }
+  }
+
   const activePrinterLabel = $derived(
     selectedPrinter || (defaultPrinter ? `${defaultPrinter} (default)` : 'System default')
   )
@@ -67,124 +298,15 @@
       ? '10×15 cm label'
       : `A4, ${printOrientation === 'landscape' ? 'landscape' : 'portrait'}`
   )
-
-  async function refreshPreview() {
-    if (queue.length === 0) {
-      previewRows = []
-      canPrint = false
-      return
-    }
-    loading = true
-    error = ''
-    try {
-      const result = await api.previewPrint(queue)
-      previewRows = result.rows
-      canPrint = result.can_print
-    } catch (e) {
-      error = e.message
-      previewRows = []
-      canPrint = false
-    } finally {
-      loading = false
-    }
-  }
-
-  function addRow() {
-    const trimmed = artNum.trim()
-    const count = Number(cartons)
-    if (!trimmed) {
-      error = 'Enter an Art Num'
-      return
-    }
-    if (!Number.isInteger(count) || count <= 0) {
-      error = 'Cartons must be a positive whole number'
-      return
-    }
-    queue = [...queue, { art_num: trimmed, cartons: count }]
-    artNum = ''
-    cartons = 1
-    error = ''
-    refreshPreview()
-    artInput?.focus()
-  }
-
-  function removeRow(index) {
-    queue = queue.filter((_, i) => i !== index)
-    refreshPreview()
-  }
-
-  function clearAll() {
-    queue = []
-    previewRows = []
-    canPrint = false
-    error = ''
-  }
-
-  async function printNow() {
-    if (!canPrint || queue.length === 0) return
-    printing = true
-    error = ''
-    try {
-      await api.print(queue)
-      clearAll()
-    } catch (e) {
-      error = e.message
-    } finally {
-      printing = false
-    }
-  }
-
-  async function printSingle() {
-    const trimmed = artNum.trim()
-    const count = Number(cartons)
-    if (!trimmed) {
-      error = 'Enter an Art Num'
-      return
-    }
-    if (!Number.isInteger(count) || count <= 0) {
-      error = 'Cartons must be a positive whole number'
-      return
-    }
-    printing = true
-    error = ''
-    try {
-      const lines = [{ art_num: trimmed, cartons: count }]
-      const preview = await api.previewPrint(lines)
-      if (!preview.can_print) {
-        error = preview.rows[0]?.error || 'Cannot print this row'
-        return
-      }
-      await api.print(lines)
-      artNum = ''
-      cartons = 1
-    } catch (e) {
-      error = e.message
-    } finally {
-      printing = false
-    }
-  }
-
-  function onArtKeydown(e) {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      cartonsInput?.focus()
-      cartonsInput?.select()
-    }
-  }
-
-  function onCartonsKeydown(e) {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      addRow()
-    }
-  }
 </script>
 
 <div class="page">
   <header class="page-header">
     <div>
-      <h1>Print Labels</h1>
-      <p class="subtitle">Enter Art Num and cartons. Qty is calculated from Qty/Carton data.</p>
+      <h1>Pallet Print</h1>
+      <p class="subtitle">
+        Import a supplier packlist, scan a pallet, then scan each carton to build and print labels.
+      </p>
     </div>
     <div class="printer-config">
       <span class="printer-current" title={`${activePrinterLabel} — ${layoutLabel}`}>
@@ -197,10 +319,6 @@
       </span>
       <span class="layout-badge" title="Print layout">{layoutLabel}</span>
       <button class="btn-ghost small" onclick={() => (showConfig = !showConfig)}>
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="3"/>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-        </svg>
         Printer
       </button>
 
@@ -227,9 +345,6 @@
               <option value="portrait">Portrait</option>
               <option value="landscape">Landscape</option>
             </select>
-            <p class="panel-hint">
-              Portrait: standard A4. Landscape: A4 rotated 90°.
-            </p>
           {/if}
 
           <label for="printer-select" class="field-spaced">Printer</label>
@@ -256,102 +371,192 @@
     <div class="banner error">{error}</div>
   {/if}
 
-  <section class="card entry-card">
-    <div class="entry-grid">
-      <div class="field">
-        <label for="art-num">Art Num</label>
-        <input
-          id="art-num"
-          type="text"
-          bind:value={artNum}
-          bind:this={artInput}
-          onkeydown={onArtKeydown}
-          placeholder="e.g. PK1400"
-          autocomplete="off"
-        />
-      </div>
-      <div class="field narrow">
-        <label for="cartons">Cartons</label>
-        <input
-          id="cartons"
-          type="number"
-          min="1"
-          step="1"
-          bind:value={cartons}
-          bind:this={cartonsInput}
-          onkeydown={onCartonsKeydown}
-        />
-      </div>
-      <div class="entry-actions">
-        <button class="btn-ghost" onclick={addRow} disabled={printing}>Add Row</button>
-        <button class="btn-primary" onclick={printSingle} disabled={printing}>
-          {printing ? 'Printing...' : 'Print Single'}
-        </button>
-      </div>
-    </div>
-  </section>
+  <input
+    type="file"
+    accept=".xlsx,.xlsm"
+    bind:this={importInput}
+    onchange={handleImportFile}
+    hidden
+  />
 
-  <section class="card preview-card">
-    <div class="preview-header">
-      <h2>Preview</h2>
-      <div class="preview-actions">
-        <button class="btn-ghost" onclick={clearAll} disabled={queue.length === 0 || printing}>Clear</button>
-        <button class="btn-primary" onclick={printNow} disabled={!canPrint || printing || loading}>
-          {printing ? 'Printing...' : `Print ${queue.length || ''} Row${queue.length === 1 ? '' : 's'}`}
+  {#if !packlistLoaded}
+    <section class="card import-card">
+      <h2>Import packlist</h2>
+      <p class="muted">
+        Upload the supplier packlist Excel file before scanning pallets. Columns A–E: Carton Number,
+        Stock code, Total Quantity, Qty/Carton, Number of Cartons.
+      </p>
+      <div class="import-actions">
+        <button class="btn-primary" onclick={() => importInput?.click()} disabled={importing}>
+          {importing ? 'Importing...' : 'Choose packlist file'}
         </button>
+        <button class="btn-ghost" onclick={downloadTemplate}>Download template</button>
       </div>
-    </div>
+      {#if importErrors.length > 0}
+        <ul class="error-list">
+          {#each importErrors as msg}
+            <li>{msg}</li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+  {:else}
+    <section class="card packlist-banner">
+      <div>
+        <strong>Packlist loaded</strong>
+        <span class="muted">
+          {packlistFilename ? `${packlistFilename} — ` : ''}{packlistLineCount} lines, {packlistCartonCount} cartons
+          · {assignedCartons} on pallets, {remainingCartons} remaining
+        </span>
+      </div>
+      <button class="btn-ghost small" onclick={replacePacklist}>Replace packlist</button>
+    </section>
 
-    {#if loading}
-      <p class="muted">Updating preview...</p>
-    {:else if previewRows.length === 0}
-      <p class="muted">Add rows to build a multi-row print job, or use Print Single above.</p>
-    {:else}
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Art Num</th>
-              <th>Cartons</th>
-              <th>Qty/Carton</th>
-              <th>Qty</th>
-              <th>Barcode</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each previewRows as row, i}
-              <tr class:error-row={row.error}>
-                <td>{row.art_num}</td>
-                <td>{row.cartons}</td>
-                <td>{row.qty_per_carton ?? '—'}</td>
-                <td>
-                  {#if row.error}
-                    <span class="tag tag-danger">{row.error}</span>
-                  {:else}
-                    <strong>{row.qty}</strong>
-                  {/if}
-                </td>
-                <td class="barcode-cell">
-                  {#if row.barcode_png_base64}
-                    <img
-                      src={`data:image/png;base64,${row.barcode_png_base64}`}
-                      alt={`Barcode for ${row.art_num}`}
-                    />
-                  {:else}
-                    —
-                  {/if}
-                </td>
-                <td>
-                  <button class="btn-ghost small" onclick={() => removeRow(i)}>Remove</button>
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+    {#if packlistWarnings.length > 0}
+      <div class="banner warn">
+        {packlistWarnings.length} packlist warning{packlistWarnings.length === 1 ? '' : 's'} (qty mismatches). Import still succeeded.
       </div>
     {/if}
-  </section>
+
+    <section class="card entry-card">
+      <div class="entry-grid">
+        <div class="field">
+          <label for="pallet-num">Pallet number</label>
+          <input
+            id="pallet-num"
+            type="text"
+            bind:value={palletNum}
+            bind:this={palletInput}
+            onkeydown={onPalletKeydown}
+            placeholder="Scan pallet barcode"
+            autocomplete="off"
+            disabled={printing}
+          />
+        </div>
+        <div class="field">
+          <label for="carton-scan">Carton number</label>
+          <input
+            id="carton-scan"
+            type="text"
+            bind:value={cartonScan}
+            bind:this={cartonInput}
+            onkeydown={onCartonKeydown}
+            placeholder={palletLocked ? 'Scan carton barcode' : 'Enter pallet first'}
+            autocomplete="off"
+            disabled={!palletLocked || printing}
+          />
+        </div>
+        <div class="entry-actions">
+          <button class="btn-ghost" onclick={addCartonScan} disabled={!palletLocked || printing}>Add</button>
+          <button class="btn-ghost" onclick={clearPallet} disabled={printing}>Clear pallet</button>
+        </div>
+      </div>
+    </section>
+
+    {#if scanDetails.length > 0}
+      <section class="card">
+        <h2 class="section-title">Scanned cartons</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Scan</th>
+                <th>Carton</th>
+                <th>Stock code</th>
+                <th>Qty/Carton</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each scanDetails as scan, i}
+                <tr class:error-row={scan.error}>
+                  <td>{scan.scan}</td>
+                  <td>{scan.carton_id ?? '—'}</td>
+                  <td>
+                    {#if scan.error}
+                      —
+                    {:else if scan.products?.length > 1}
+                      {#each scan.products as product}
+                        <div>{product.stock_code}</div>
+                      {/each}
+                    {:else}
+                      {scan.stock_code ?? scan.products?.[0]?.stock_code ?? '—'}
+                    {/if}
+                  </td>
+                  <td>
+                    {#if scan.error}
+                      <span class="tag tag-danger">{scan.error}</span>
+                    {:else if scan.products?.length > 1}
+                      {#each scan.products as product}
+                        <div>{product.qty_per_carton}</div>
+                      {/each}
+                    {:else}
+                      {scan.qty_per_carton ?? scan.products?.[0]?.qty_per_carton ?? '—'}
+                    {/if}
+                  </td>
+                  <td>
+                    <button class="btn-ghost small" onclick={() => removeCarton(scan.scan)}>Remove</button>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {/if}
+
+    <section class="card preview-card">
+      <div class="preview-header">
+        <h2>Print preview</h2>
+        <button
+          class="btn-primary"
+          onclick={printNow}
+          disabled={!canPrint || printing || loading}
+        >
+          {printing ? 'Printing...' : 'Print pallet'}
+        </button>
+      </div>
+
+      {#if loading}
+        <p class="muted">Updating preview...</p>
+      {:else if previewRows.length === 0}
+        <p class="muted">Scan cartons to see aggregated products for this pallet.</p>
+      {:else}
+        <p class="pallet-label">Pallet: <strong>{palletNum}</strong></p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Stock code</th>
+                <th>Cartons</th>
+                <th>Qty/Carton</th>
+                <th>Qty</th>
+                <th>Barcode</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each previewRows as row}
+                <tr>
+                  <td>{row.art_num}</td>
+                  <td>{row.cartons}</td>
+                  <td>{row.qty_per_carton}</td>
+                  <td><strong>{row.qty}</strong></td>
+                  <td class="barcode-cell">
+                    {#if row.barcode_png_base64}
+                      <img
+                        src={`data:image/png;base64,${row.barcode_png_base64}`}
+                        alt={`Barcode for ${row.art_num}`}
+                      />
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    </section>
+  {/if}
 </div>
 
 <style>
@@ -374,6 +579,11 @@
     margin-bottom: 4px;
   }
 
+  .subtitle {
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
   .printer-config {
     position: relative;
     display: flex;
@@ -394,10 +604,6 @@
     text-overflow: ellipsis;
   }
 
-  .printer-current svg {
-    flex-shrink: 0;
-  }
-
   .layout-badge {
     font-size: 11px;
     color: var(--text-muted);
@@ -410,9 +616,6 @@
 
   .btn-ghost.small,
   .btn-primary.small {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
     padding: 6px 10px;
     font-size: 12px;
   }
@@ -493,21 +696,57 @@
     margin-top: 14px;
   }
 
-  .subtitle {
-    color: var(--text-muted);
-    font-size: 13px;
-  }
-
   .banner {
     margin: 16px 0;
     padding: 12px 14px;
     border-radius: var(--radius);
     font-size: 13px;
   }
+
   .banner.error {
     background: var(--danger-bg);
     color: var(--danger);
     border: 1px solid #fecaca;
+  }
+
+  .banner.warn {
+    background: #fffce7;
+    color: #89470a;
+    border: 1px solid #ffed86;
+  }
+
+  .import-card h2,
+  .section-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+
+  .import-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+
+  .error-list {
+    margin-top: 14px;
+    padding-left: 18px;
+    font-size: 13px;
+    color: var(--danger);
+  }
+
+  .packlist-banner {
+    margin-top: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .packlist-banner strong {
+    display: block;
+    margin-bottom: 2px;
   }
 
   .entry-card {
@@ -516,7 +755,7 @@
 
   .entry-grid {
     display: grid;
-    grid-template-columns: 1fr 120px auto;
+    grid-template-columns: 1fr 1fr auto;
     gap: 16px;
     align-items: end;
   }
@@ -554,9 +793,10 @@
     font-weight: 600;
   }
 
-  .preview-actions {
-    display: flex;
-    gap: 8px;
+  .pallet-label {
+    font-size: 13px;
+    margin-bottom: 12px;
+    color: var(--text-muted);
   }
 
   .muted {
@@ -597,11 +837,6 @@
     height: 42px;
     max-width: 180px;
     object-fit: contain;
-  }
-
-  .small {
-    padding: 6px 10px;
-    font-size: 12px;
   }
 
   @media (max-width: 800px) {

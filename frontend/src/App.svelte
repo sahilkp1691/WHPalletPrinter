@@ -1,6 +1,6 @@
 <script>
   import PrintView from './views/PrintView.svelte'
-  import DataView from './views/DataView.svelte'
+  import DashboardView from './views/DashboardView.svelte'
 
   let activeTab = $state('print')
 </script>
@@ -23,29 +23,31 @@
           <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
           <rect x="6" y="14" width="12" height="8"/>
         </svg>
-        Print
+        Pallet Print
       </button>
       <button
         class="nav-item"
-        class:active={activeTab === 'data'}
-        onclick={() => (activeTab = 'data')}
+        class:active={activeTab === 'dashboard'}
+        onclick={() => (activeTab = 'dashboard')}
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <ellipse cx="12" cy="5" rx="9" ry="3"/>
-          <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
-          <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+          <rect x="3" y="3" width="7" height="7"/>
+          <rect x="14" y="3" width="7" height="7"/>
+          <rect x="14" y="14" width="7" height="7"/>
+          <rect x="3" y="14" width="7" height="7"/>
         </svg>
-        Article Data
+        Dashboard
       </button>
     </div>
   </nav>
 
   <main class="content">
-    {#if activeTab === 'print'}
+    <div class="tab-panel" class:hidden={activeTab !== 'print'} aria-hidden={activeTab !== 'print'}>
       <PrintView />
-    {:else}
-      <DataView />
-    {/if}
+    </div>
+    <div class="tab-panel" class:hidden={activeTab !== 'dashboard'} aria-hidden={activeTab !== 'dashboard'}>
+      <DashboardView visible={activeTab === 'dashboard'} />
+    </div>
   </main>
 </div>
 
@@ -122,5 +124,9 @@
   .content {
     overflow-y: auto;
     background: var(--bg);
+  }
+
+  .tab-panel.hidden {
+    display: none;
   }
 </style>

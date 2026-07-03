@@ -49,7 +49,8 @@ Fetch-Installer -FileName "vc_redist.x64.exe" `
 function Find-Iscc {
     $candidates = @(
         "${env:ProgramFiles(x86)}\Inno Setup 6\iscc.exe",
-        "${env:ProgramFiles}\Inno Setup 6\iscc.exe"
+        "${env:ProgramFiles}\Inno Setup 6\iscc.exe",
+        "$env:LOCALAPPDATA\Programs\Inno Setup 6\iscc.exe"
     )
     foreach ($p in $candidates) {
         if ($p -and (Test-Path $p)) { return $p }
