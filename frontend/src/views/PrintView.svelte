@@ -1,6 +1,7 @@
 <script>
   import { onMount, tick } from 'svelte'
   import { api, downloadBlob } from '../lib/api.js'
+  import ReprintPanel from '../lib/ReprintPanel.svelte'
 
   let packlistLoaded = $state(false)
   let packlistFilename = $state('')
@@ -33,12 +34,29 @@
   let showConfig = $state(false)
   let savingPrinter = $state(false)
 
+  let builtPallets = $state([])
+  let reprintTarget = $state(null)
+
   const palletLocked = $derived(palletNum.trim().length > 0)
 
   onMount(async () => {
     await Promise.all([loadPrinters(), loadPacklistStatus()])
+    await loadBuiltPallets()
     focusAfterPacklist()
   })
+
+  async function loadBuiltPallets() {
+    if (!packlistLoaded) {
+      builtPallets = []
+      return
+    }
+    try {
+      const dash = await api.getPacklistDashboard()
+      builtPallets = (dash.pallets || []).filter((p) => p.carton_count > 0)
+    } catch {
+      builtPallets = []
+    }
+  }
 
   async function loadPacklistStatus() {
     try {
@@ -137,6 +155,7 @@
       packlistLineCount = result.line_count
       packlistCartonCount = result.carton_count
       await loadPacklistStatus()
+      await loadBuiltPallets()
       clearPalletLocal()
       await focusAfterPacklist()
     } catch (e) {
@@ -168,6 +187,7 @@
       previewRows = result.rows
       canPrint = result.can_print
       await loadPacklistStatus()
+      await loadBuiltPallets()
     } catch (e) {
       if (e.message?.includes('not found') || e.message?.includes('404')) {
         scanDetails = []
@@ -214,6 +234,7 @@
       canPrint = result.can_print
       cartonScan = ''
       await loadPacklistStatus()
+      await loadBuiltPallets()
       cartonInput?.focus()
     } catch (e) {
       error = e.message
@@ -239,6 +260,7 @@
       previewRows = result.rows
       canPrint = result.can_print
       await loadPacklistStatus()
+      await loadBuiltPallets()
     } catch (e) {
       error = e.message
     } finally {
@@ -267,6 +289,7 @@
       await api.clearPallet(palletNum.trim())
       clearPalletLocal()
       await loadPacklistStatus()
+      await loadBuiltPallets()
     } catch (e) {
       error = e.message
     } finally {
@@ -282,11 +305,22 @@
       await api.print({ pallet_num: palletNum.trim() })
       clearPalletLocal()
       await loadPacklistStatus()
+      await loadBuiltPallets()
     } catch (e) {
       error = e.message
     } finally {
       printing = false
     }
+  }
+
+  function closeReprint() {
+    reprintTarget = null
+  }
+
+  async function onReprintDone() {
+    reprintTarget = null
+    await loadPacklistStatus()
+    await loadBuiltPallets()
   }
 
   const activePrinterLabel = $derived(
@@ -453,6 +487,59 @@
       </div>
     </section>
 
+    {#if builtPallets.length > 0}
+      <section class="card built-pallets-card">
+        <div class="preview-header">
+          <h2>Built pallets</h2>
+          <span class="muted">{builtPallets.length} pallet{builtPallets.length === 1 ? '' : 's'} with cartons</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Pallet</th>
+                <th>Cartons</th>
+                <th>Status</th>
+                <th>Printed</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each builtPallets as pallet}
+                <tr>
+                  <td><strong>{pallet.pallet_num}</strong></td>
+                  <td>{pallet.carton_count}</td>
+                  <td>
+                    {#if pallet.printed}
+                      <span class="tag tag-success">Printed</span>
+                    {:else}
+                      <span class="tag tag-warn">Ready</span>
+                    {/if}
+                  </td>
+                  <td>
+                    {#if pallet.printed_at}
+                      {new Date(pallet.printed_at).toLocaleString()}
+                    {:else}
+                      —
+                    {/if}
+                  </td>
+                  <td>
+                    <button
+                      class="btn-ghost small"
+                      onclick={() => (reprintTarget = pallet.pallet_num)}
+                      disabled={printing}
+                    >
+                      Reprint
+                    </button>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {/if}
+
     {#if scanDetails.length > 0}
       <section class="card">
         <h2 class="section-title">Scanned cartons</h2>
@@ -558,6 +645,19 @@
     </section>
   {/if}
 </div>
+
+{#if reprintTarget}
+  <ReprintPanel
+    palletNum={reprintTarget}
+    {printers}
+    {defaultPrinter}
+    savedPrinter={selectedPrinter}
+    savedFormat={printFormat}
+    savedOrientation={printOrientation}
+    ondone={onReprintDone}
+    oncancel={closeReprint}
+  />
+{/if}
 
 <style>
   .page {
@@ -778,6 +878,28 @@
 
   .preview-card {
     margin-top: 20px;
+  }
+
+  .built-pallets-card {
+    margin-top: 20px;
+  }
+
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .tag-success {
+    background: #e4f4e4;
+    color: #326633;
+  }
+
+  .tag-warn {
+    background: #fff8c1;
+    color: #89470a;
   }
 
   .preview-header {

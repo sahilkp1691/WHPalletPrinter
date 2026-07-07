@@ -61,16 +61,34 @@ function Find-Iscc {
 }
 
 $iscc = Find-Iscc
+$outDir = Join-Path $PSScriptRoot "installer\Output"
+$outFile = Join-Path $outDir "WHPalletPrinter-Setup-$Version.exe"
+$tempOutDir = Join-Path $env:TEMP "WHPalletPrinter-installer-build"
+$tempOutFile = Join-Path $tempOutDir "WHPalletPrinter-Setup-$Version.exe"
+
+New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+if (Test-Path $tempOutDir) {
+    Remove-Item $tempOutDir -Recurse -Force
+}
+New-Item -ItemType Directory -Force -Path $tempOutDir | Out-Null
+
 Write-Host "`n=== Compiling installer ===" -ForegroundColor Cyan
-& $iscc "/DMyAppVersion=$Version" "installer\WHPalletPrinter.iss"
+& $iscc "/DMyAppVersion=$Version" "/O$tempOutDir" "installer\WHPalletPrinter.iss"
 if ($LASTEXITCODE -ne 0) {
     throw "iscc.exe failed (exit code $LASTEXITCODE)"
 }
 
-$out = Join-Path $PSScriptRoot "installer\Output\WHPalletPrinter-Setup-$Version.exe"
-if (-not (Test-Path $out)) {
-    throw "Installer not produced at expected path: $out"
+if (-not (Test-Path $tempOutFile)) {
+    throw "Installer not produced at expected path: $tempOutFile"
 }
+
+if (Test-Path $outFile) {
+    Remove-Item $outFile -Force
+}
+Move-Item $tempOutFile $outFile -Force
+Remove-Item $tempOutDir -Recurse -Force -ErrorAction SilentlyContinue
+
+$out = $outFile
 
 Write-Host "`n=== Done ===" -ForegroundColor Green
 Get-Item $out | Format-List Name, Length, LastWriteTime

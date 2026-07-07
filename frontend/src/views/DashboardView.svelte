@@ -1,5 +1,7 @@
 <script>
+  import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
+  import ReprintPanel from '../lib/ReprintPanel.svelte'
 
   let { visible = false } = $props()
 
@@ -7,6 +9,28 @@
   let error = $state('')
   let dashboard = $state(null)
   let cartonFilter = $state('all')
+
+  let printers = $state([])
+  let defaultPrinter = $state(null)
+  let selectedPrinter = $state('')
+  let printFormat = $state('a4')
+  let printOrientation = $state('portrait')
+  let reprintTarget = $state(null)
+
+  onMount(loadPrinters)
+
+  async function loadPrinters() {
+    try {
+      const info = await api.listPrinters()
+      printers = info.printers
+      defaultPrinter = info.default
+      selectedPrinter = info.selected || ''
+      printFormat = info.format || 'a4'
+      printOrientation = info.orientation || 'portrait'
+    } catch {
+      // Non-fatal for dashboard viewing.
+    }
+  }
 
   $effect(() => {
     if (visible) loadDashboard()
@@ -35,6 +59,20 @@
     }
     return dashboard.cartons
   })
+
+  const builtPallets = $derived(() => {
+    if (!dashboard?.pallets) return []
+    return dashboard.pallets.filter((p) => p.carton_count > 0)
+  })
+
+  function closeReprint() {
+    reprintTarget = null
+  }
+
+  async function onReprintDone() {
+    reprintTarget = null
+    await loadDashboard()
+  }
 </script>
 
 <div class="page">
@@ -90,10 +128,10 @@
 
     <section class="card">
       <div class="card-header">
-        <h2>Pallets</h2>
+        <h2>Built pallets</h2>
       </div>
-      {#if dashboard.pallets.length === 0}
-        <p class="muted">No pallets started yet.</p>
+      {#if builtPallets().length === 0}
+        <p class="muted">No pallets with cartons yet.</p>
       {:else}
         <div class="table-wrap">
           <table>
@@ -103,10 +141,12 @@
                 <th>Cartons</th>
                 <th>Status</th>
                 <th>Created</th>
+                <th>Printed</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
-              {#each dashboard.pallets as pallet}
+              {#each builtPallets() as pallet}
                 <tr>
                   <td><strong>{pallet.pallet_num}</strong></td>
                   <td>{pallet.carton_count}</td>
@@ -114,10 +154,22 @@
                     {#if pallet.printed}
                       <span class="tag tag-success">Printed</span>
                     {:else}
-                      <span class="tag tag-muted">In progress</span>
+                      <span class="tag tag-warn">Ready</span>
                     {/if}
                   </td>
                   <td>{new Date(pallet.created_at).toLocaleString()}</td>
+                  <td>
+                    {#if pallet.printed_at}
+                      {new Date(pallet.printed_at).toLocaleString()}
+                    {:else}
+                      —
+                    {/if}
+                  </td>
+                  <td>
+                    <button class="btn-ghost small" onclick={() => (reprintTarget = pallet.pallet_num)}>
+                      Reprint
+                    </button>
+                  </td>
                 </tr>
               {/each}
             </tbody>
@@ -208,6 +260,19 @@
     </section>
   {/if}
 </div>
+
+{#if reprintTarget}
+  <ReprintPanel
+    palletNum={reprintTarget}
+    {printers}
+    {defaultPrinter}
+    savedPrinter={selectedPrinter}
+    savedFormat={printFormat}
+    savedOrientation={printOrientation}
+    ondone={onReprintDone}
+    oncancel={closeReprint}
+  />
+{/if}
 
 <style>
   .page {
@@ -391,6 +456,11 @@
   .tag-warn {
     background: #fff8c1;
     color: #89470a;
+  }
+
+  .btn-ghost.small {
+    padding: 6px 10px;
+    font-size: 12px;
   }
 
   .tag-muted {

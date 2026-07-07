@@ -24,6 +24,9 @@ router = APIRouter(prefix="/api/print", tags=["print"])
 
 class PalletPrintIn(BaseModel):
     pallet_num: str
+    printer: str | None = None
+    format: str | None = None
+    orientation: str | None = None
 
 
 class PrintJobOut(BaseModel):
@@ -122,6 +125,12 @@ def print_labels(body: PalletPrintIn, db: Session = Depends(get_db)):
     ]
 
     selected, fmt, orientation = _read_print_settings(db)
+    if body.printer is not None:
+        selected = body.printer or None
+    if body.format is not None:
+        fmt = _normalize_format(body.format)
+    if body.orientation is not None:
+        orientation = _normalize_orientation(body.orientation)
 
     pdf_bytes = build_pdf(print_rows, print_format=fmt, orientation=orientation)
     try:
